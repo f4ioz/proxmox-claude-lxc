@@ -53,8 +53,10 @@ identifiant Anthropic.
 | Réseau | `vmbr0`, DHCP (ou IP fixe en CIDR + passerelle) |
 | Utilisateur | `dev`, mot de passe généré (affiché à la fin) si vous n'en tapez pas |
 
-Le compte **root** du conteneur n'a pas de mot de passe : `pct enter <ID>`
-depuis le nœud, ou SSH avec la clé fournie.
+Le compte **root** du conteneur n'a pas de mot de passe : il est
+**verrouillé** (personne ne peut s'y connecter par mot de passe), ce qui est
+plus sûr qu'un mot de passe root. On y accède par `pct enter <ID>` depuis le
+nœud, ou en SSH avec la clé fournie.
 
 ## Sans question (plusieurs conteneurs)
 
@@ -87,6 +89,9 @@ CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \
 
 - Conteneur **non privilégié** : root dans le conteneur n'est pas root sur
   l'hôte.
+- Root : mot de passe verrouillé (`passwd -l root`) et SSH par clé uniquement
+  (`PermitRootLogin prohibit-password`), imposés par le script quel que soit
+  le template.
 - Le mot de passe passe par l'entrée standard (`chpasswd`), jamais sur une
   ligne de commande.
 - Sudo sans mot de passe est un choix de confort pour un conteneur de

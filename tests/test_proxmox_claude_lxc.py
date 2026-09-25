@@ -114,6 +114,9 @@ def test_interactive_install_with_defaults(tmp_path, proxmox) -> None:
                 "--net0 name=eth0,bridge=vmbr0,ip=dhcp", "--ssh-public-keys", "--tags claude"):
         assert opt in create, opt
     assert "--password" not in create                        # root: pct enter or SSH key only
+    assert "passwd -l root" in calls                          # locked whatever the template does
+    assert "PermitRootLogin prohibit-password" in calls
+    assert calls.index("passwd -l root") < calls.index("useradd")
     assert "ripgrep" in calls and "build-essential" in calls and "openssh-server" in calls
     assert "useradd -m -s /bin/bash -G sudo dev" in calls
     assert "NOPASSWD:ALL" in calls

@@ -19,7 +19,7 @@
 # shellcheck disable=SC2153
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 REPO_URL="https://github.com/f4ioz/proxmox-claude-lxc"
 CLAUDE_INSTALL_URL="${CLX_CLAUDE_INSTALL_URL:-https://claude.ai/install.sh}"
 
@@ -78,6 +78,7 @@ load_fr() {
   MSG["Passwords differ."]="Mots de passe différents."
   MSG["Public SSH key (line ssh-ed25519/ssh-rsa… or file path), Enter to skip"]="Clé SSH publique (ligne ssh-ed25519/ssh-rsa… ou chemin d'un fichier), Entrée pour ignorer"
   MSG["RAM (MB)"]="RAM (Mo)"
+  MSG["Root: password locked, SSH by key only."]="Root : mot de passe verrouillé, SSH par clé uniquement."
   MSG["Run this as root on the Proxmox node."]="À lancer en root sur le nœud Proxmox."
   MSG["SSH key file not found: {1}"]="Fichier de clé SSH introuvable : {1}"
   MSG["Starting…"]="Démarrage…"
@@ -379,7 +380,7 @@ create_lxc() {
   msg_info "Creating container {1}…" "$CTID"
   # nesting=1: systemd services of Debian 13 need namespaces in an
   # unprivileged container; keyctl=1 lets tools that use the kernel keyring
-  # (e.g. Docker, podman) work. Root has no password: use pct enter or the key.
+  # (e.g. Docker, podman) work. Root gets no password: harden_root() locks it.
   pct create "$CTID" "$TEMPLATE" \
     --hostname "$CT_HOST" \
     --cores "$CORES" \
@@ -428,6 +429,17 @@ prepare_ct() {
   ct bash -c 'sed -i "s/^rlimit-nproc=/#rlimit-nproc=/" /etc/avahi/avahi-daemon.conf
               systemctl restart avahi-daemon' >/dev/null 2>&1 || true
   msg_ok "Packages installed."
+}
+
+harden_root() {
+  # Root never logs in with a password: its password is locked (whatever the
+  # template ships with) and SSH only accepts a key for it. Root access stays
+  # possible through `pct enter` on the node, or SSH with the provided key.
+  ct passwd -l root >/dev/null
+  ct bash -c 'install -d /etc/ssh/sshd_config.d
+              echo "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/10-root-key-only.conf
+              systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || true'
+  msg_ok "Root: password locked, SSH by key only."
 }
 
 create_user() {
@@ -528,6 +540,7 @@ main() {
   create_lxc
   wait_network
   prepare_ct
+  harden_root
   create_user
   install_claude || claude_failed
   show_summary

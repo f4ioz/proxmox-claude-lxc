@@ -52,8 +52,9 @@ an Anthropic API key): the script never handles any Anthropic credential.
 | Network | `vmbr0`, DHCP (or a static CIDR IP + gateway) |
 | User | `dev`, generated password (shown at the end) unless you type one |
 
-The container's **root** account has no password: `pct enter <ID>` from the
-node, or SSH with the key you provided.
+The container's **root** account has no password: it is **locked** (nobody
+can log in to it with a password), which is safer than a root password. Get
+in with `pct enter <ID>` from the node, or SSH with the key you provided.
 
 ## No questions (several containers)
 
@@ -85,6 +86,9 @@ CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \
 ## Security
 
 - **Unprivileged** container: root inside is not root on the host.
+- Root: password locked (`passwd -l root`) and SSH by key only
+  (`PermitRootLogin prohibit-password`), enforced by the script whatever the
+  template does.
 - The password goes through standard input (`chpasswd`), never on a command
   line.
 - Passwordless sudo is a convenience for an isolated development container:
