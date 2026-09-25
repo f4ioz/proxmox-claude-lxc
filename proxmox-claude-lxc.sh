@@ -19,7 +19,7 @@
 # shellcheck disable=SC2153
 set -euo pipefail
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 REPO_URL="https://github.com/f4ioz/proxmox-claude-lxc"
 CLAUDE_INSTALL_URL="${CLX_CLAUDE_INSTALL_URL:-https://claude.ai/install.sh}"
 
@@ -435,12 +435,13 @@ wait_network() {
 }
 
 # apt inside the container, never waiting for anything: no stdin, default
-# answers to dpkg questions, time limit; progress shown one line per package.
+# answers to dpkg questions, time limit. Its output is shown (minus the most
+# repetitive dpkg lines), so a stall shows exactly where it happens.
 APT_TIMEOUT="${CLX_APT_TIMEOUT:-1800}"   # seconds
 apt_ct() {  # apt_ct ARGS… (e.g. install -y pkg…)
   ct timeout "$APT_TIMEOUT" apt-get -q -o Dpkg::Use-Pty=0 \
     -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" </dev/null 2>&1 \
-    | awk '/^Setting up /{print "      " $0; fflush()}'
+    | awk '!/^(Selecting previously unselected|Preparing to unpack|\(Reading database)/ {print "      " $0; fflush()}'
   return "${PIPESTATUS[0]}"
 }
 
