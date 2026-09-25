@@ -19,7 +19,7 @@
 # shellcheck disable=SC2153
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 REPO_URL="https://github.com/f4ioz/proxmox-claude-lxc"
 CLAUDE_INSTALL_URL="${CLX_CLAUDE_INSTALL_URL:-https://claude.ai/install.sh}"
 
@@ -72,6 +72,12 @@ load_fr() {
   MSG["No Internet access (DNS) in the container: check bridge, IP and gateway."]="Pas d'accès à Internet (DNS) dans la CT : vérifier bridge, IP et passerelle."
   MSG["No active storage accepts templates (vztmpl)."]="Aucun stockage actif n'accepte les templates (vztmpl)."
   MSG["No debian-13/12-standard template in pveam."]="Aucun template debian-13/12-standard dans pveam."
+  MSG["Starting services: ssh, avahi…"]="Démarrage des services : ssh, avahi…"
+  MSG["Services started."]="Services démarrés."
+  MSG["ssh did not start: use pct enter {1}."]="ssh n'a pas démarré : utiliser pct enter {1}."
+  MSG["avahi (http://{1}.local) did not start: use the IP address."]="avahi (http://{1}.local) n'a pas démarré : utiliser l'adresse IP."
+  MSG["apt failed or took longer than {1} s (container {2} is kept)."]="apt a échoué ou a dépassé {1} s (la CT {2} est conservée)."
+  MSG["Log         : pct exec {1} -- tail -n 30 /var/log/apt/term.log"]="Journal     : pct exec {1} -- tail -n 30 /var/log/apt/term.log"
   MSG["Packages installed."]="Paquets installés."
   MSG["Packages: {1}…"]="Paquets : {1}…"
   MSG["Password of {1} (empty = generated)"]="Mot de passe de {1} (vide = généré)"
@@ -181,6 +187,7 @@ Variables (all optional):
   CLX_SSH_KEY   public SSH key, or path to a .pub file
   CLX_SUDO_NOPASSWD  1 = passwordless sudo ($D_SUDO_NOPASSWD)
   CLX_GIT_NAME, CLX_GIT_EMAIL   git identity of the user
+  CLX_APT_TIMEOUT   time limit of each apt step, seconds (1800)
 
 Example — a second container, no questions:
   CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \\
@@ -427,17 +434,50 @@ wait_network() {
   exit 1
 }
 
+# apt inside the container, never waiting for anything: no stdin, default
+# answers to dpkg questions, time limit; progress shown one line per package.
+APT_TIMEOUT="${CLX_APT_TIMEOUT:-1800}"   # seconds
+apt_ct() {  # apt_ct ARGS… (e.g. install -y pkg…)
+  ct timeout "$APT_TIMEOUT" apt-get -q -o Dpkg::Use-Pty=0 \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" </dev/null 2>&1 \
+    | awk '/^Setting up /{print "      " $0; fflush()}'
+  return "${PIPESTATUS[0]}"
+}
+
 prepare_ct() {
+  # No service may start while packages are installed: a daemon started by a
+  # postinst script can hang there, or keep the pct exec session open (it
+  # inherits its output), and the script would wait forever. Services are
+  # started explicitly once apt is done.
+  ct bash -c 'printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d'
+
   msg_info "Updating the system (apt)…"
-  ct bash -c 'apt-get update -qq && apt-get upgrade -y -qq' >/dev/null
+  apt_ct update >/dev/null || apt_failed
+  apt_ct upgrade -y || apt_failed
   msg_ok "System up to date."
   msg_info "Packages: {1}…" "$PACKAGES"
-  ct bash -c "apt-get install -y -qq --no-install-recommends $PACKAGES" >/dev/null
+  # shellcheck disable=SC2086  # PACKAGES is a list of words
+  apt_ct install -y --no-install-recommends $PACKAGES || apt_failed
+  ct rm -f /usr/sbin/policy-rc.d
+  msg_ok "Packages installed."
+
+  msg_info "Starting services: ssh, avahi…"
   # <name>.local address: in an unprivileged container avahi's rlimit-nproc
   # limit is shared with the other containers (same UID range) → disabled.
-  ct bash -c 'sed -i "s/^rlimit-nproc=/#rlimit-nproc=/" /etc/avahi/avahi-daemon.conf
-              systemctl restart avahi-daemon' >/dev/null 2>&1 || true
-  msg_ok "Packages installed."
+  ct sed -i "s/^rlimit-nproc=/#rlimit-nproc=/" /etc/avahi/avahi-daemon.conf || true
+  ct timeout 120 systemctl enable --now ssh </dev/null >/dev/null 2>&1 \
+    || msg_warn "ssh did not start: use pct enter {1}." "$CTID"
+  ct timeout 60 systemctl enable --now avahi-daemon </dev/null >/dev/null 2>&1 \
+    || msg_warn "avahi (http://{1}.local) did not start: use the IP address." "$CT_HOST"
+  msg_ok "Services started."
+}
+
+apt_failed() {
+  msg_err "apt failed or took longer than {1} s (container {2} is kept)." "$APT_TIMEOUT" "$CTID"
+  say "  Log         : pct exec {1} -- tail -n 30 /var/log/apt/term.log" "$CTID"
+  say "  Console     : pct enter {1}" "$CTID"
+  say "  Delete      : pct stop {1} && pct destroy {1}" "$CTID"
+  exit 1
 }
 
 harden_root() {

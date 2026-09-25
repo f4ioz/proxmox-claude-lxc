@@ -26,6 +26,8 @@ case "$1" in
     if [[ "$*" == *chpasswd* || "$*" == *authorized_keys* ]]; then
       echo "stdin[$*]: $(cat)" >> "$STDIN_LOG"
     fi
+    if [[ "$*" == *"apt-get"*" install "* && -n ${APT_FAIL:-} ]]; then echo "E: failed"; exit 124; fi
+    if [[ "$*" == *"apt-get"*" install "* ]]; then echo "Setting up ripgrep (14.1.1-1) ..."; fi
     if [[ "$*" == *"ip -4"* ]]; then echo 192.168.1.50; fi
     if [[ "$*" == *"claude --version"* ]]; then
       [[ -n ${FAIL:-} ]] && exit 1
@@ -122,6 +124,13 @@ def test_interactive_install_with_defaults(tmp_path, proxmox) -> None:
     assert calls.index("authorized_keys") < calls.index("PasswordAuthentication no")
     assert "SSH: key only, password login refused" in r.stdout
     assert "ripgrep" in calls and "build-essential" in calls and "openssh-server" in calls
+    # No service starts during apt (policy-rc.d), apt never waits: time limit,
+    # default answers; services started explicitly afterwards.
+    install = next(line for line in calls.splitlines() if "apt-get" in line and " install " in line)
+    assert "timeout 1800 apt-get" in install and "--force-confold" in install
+    i_policy, i_install = calls.index("/usr/sbin/policy-rc.d"), calls.index(install)
+    i_rm, i_ssh = calls.index("rm -f /usr/sbin/policy-rc.d"), calls.index("systemctl enable --now ssh")
+    assert i_policy < i_install < i_rm < i_ssh < calls.index("systemctl enable --now avahi-daemon")
     assert "useradd -m -s /bin/bash -G sudo dev" in calls
     assert "NOPASSWD:ALL" in calls
     assert "runuser -l dev -c curl -fsSL https://claude.ai/install.sh | bash" in calls
@@ -133,7 +142,7 @@ def test_interactive_install_with_defaults(tmp_path, proxmox) -> None:
     assert pw not in calls
     stdin = log(tmp_path, "stdin")
     assert f"dev:{pw}" in stdin and KEY in stdin
-    for expected in ("Claude Code installed: 2.1.282", "ssh dev@192.168.1.50", "pct enter 102, then su - dev",
+    for expected in ("      Setting up ripgrep", "Claude Code installed: 2.1.282", "ssh dev@192.168.1.50", "pct enter 102, then su - dev",
                      "pct stop 102 && pct destroy 102"):
         assert expected in r.stdout, expected
 
@@ -197,6 +206,14 @@ def test_typed_password_must_be_confirmed(tmp_path, proxmox) -> None:
     assert "Passwords differ." in r.stdout
     assert "dev:pw-one" in log(tmp_path, "stdin")
     assert "Password    :" not in r.stdout                   # typed, so not shown
+
+
+def test_apt_failure_stops_and_explains(tmp_path, proxmox) -> None:
+    r = run(proxmox, None, "--yes", APT_FAIL="1")
+    assert r.returncode == 1
+    assert "apt failed or took longer than 1800 s (container 102 is kept)" in r.stderr
+    assert "/var/log/apt/term.log" in r.stdout
+    assert "useradd" not in log(tmp_path) and "destroy" not in log(tmp_path)
 
 
 def test_claude_install_failure_keeps_container_and_explains(tmp_path, proxmox) -> None:

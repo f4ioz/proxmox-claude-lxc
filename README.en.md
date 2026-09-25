@@ -80,6 +80,7 @@ CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \
 | `CLX_SUDO_NOPASSWD` | `1` (default) = passwordless sudo, `0` = with password |
 | `CLX_GIT_NAME`, `CLX_GIT_EMAIL` | the user's git identity |
 | `CLX_LANG` | `fr` or `en` (like `--lang`) |
+| `CLX_APT_TIMEOUT` | time limit of each apt step, in seconds (1800) |
 
 `bash proxmox-claude-lxc.sh --help` sums all of this up.
 
