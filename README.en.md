@@ -89,6 +89,10 @@ CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \
 - Root: password locked (`passwd -l root`) and SSH by key only
   (`PermitRootLogin prohibit-password`), enforced by the script whatever the
   template does.
+- **SSH key given → SSH by key only**: password logins over SSH are refused
+  (`PasswordAuthentication no`), once the key is in place. The user's
+  password is then for sudo and the console (`pct enter`). Without a key,
+  password logins stay possible.
 - The password goes through standard input (`chpasswd`), never on a command
   line.
 - Passwordless sudo is a convenience for an isolated development container:

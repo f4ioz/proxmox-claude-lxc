@@ -19,7 +19,7 @@
 # shellcheck disable=SC2153
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 REPO_URL="https://github.com/f4ioz/proxmox-claude-lxc"
 CLAUDE_INSTALL_URL="${CLX_CLAUDE_INSTALL_URL:-https://claude.ai/install.sh}"
 
@@ -102,6 +102,10 @@ load_fr() {
   MSG["user {1} ({2}), SSH key: {3}"]="utilisateur {1} ({2}), clé SSH : {3}"
   MSG["gateway"]="passerelle"
   MSG["yes"]="oui"
+  MSG["SSH: key only, password login refused"]="SSH : clé uniquement, connexion par mot de passe refusée"
+  MSG["SSH: key only, password login refused."]="SSH : clé uniquement, connexion par mot de passe refusée."
+  MSG["SSH: password login (no key given)"]="SSH : connexion par mot de passe (aucune clé fournie)"
+  MSG["(SSH key only; the password is for sudo and the console)"]="(SSH par clé uniquement ; le mot de passe sert à sudo et à la console)"
   MSG["no"]="non"
   MSG["Claude Code is ready in container {1}"]="Claude Code est prêt dans la CT {1}"
   MSG["Container   : {1} ({2})  IP {3}"]="CT          : {1} ({2})  IP {3}"
@@ -342,6 +346,11 @@ prompt_config() {
   say "  user {1} ({2}), SSH key: {3}" "$CT_USER" \
     "$(if [[ $SUDO_NOPASSWD == 1 ]]; then t "passwordless sudo"; else t "sudo with password"; fi)" \
     "$(if [[ -n $SSH_PUBKEY ]]; then t "yes"; else t "no"; fi)"
+  if [[ -n $SSH_PUBKEY ]]; then
+    say "  SSH: key only, password login refused"
+  else
+    say "  SSH: password login (no key given)"
+  fi
   if [[ $ASSUME_YES != 1 ]]; then
     read -rp "$(t "Continue?") [$([[ $UI_LANG == fr ]] && echo "O/n" || echo "Y/n")] : " c || true
     [[ "${c:-Y}" =~ ^[OoYy]$ ]] || { msg_warn "Cancelled: nothing has been created."; exit 0; }
@@ -457,6 +466,7 @@ create_user() {
       "install -d -m 700 -o '$CT_USER' -g '$CT_USER' '$home/.ssh'
        cat >> '$home/.ssh/authorized_keys'
        chown '$CT_USER:$CT_USER' '$home/.ssh/authorized_keys'; chmod 600 '$home/.ssh/authorized_keys'"
+    ssh_key_only
   fi
   as_user "mkdir -p ~/projects"
   # ~/.local/bin (where Claude Code lives) also in non-login shells.
@@ -468,6 +478,18 @@ create_user() {
 }
 
 as_user() { ct runuser -l "$CT_USER" -c "$1"; }
+
+ssh_key_only() {
+  # Called once the key is installed, so nobody gets locked out; pct enter
+  # remains the way in anyway. Debian reads sshd_config.d/*.conf before the
+  # main file and keeps the first value found: this file (11-) also wins over
+  # a later drop-in such as 50-cloud-init.conf.
+  ct bash -c 'install -d /etc/ssh/sshd_config.d
+              printf "PasswordAuthentication no\nKbdInteractiveAuthentication no\n" \
+                > /etc/ssh/sshd_config.d/11-key-only.conf
+              systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || true'
+  msg_ok "SSH: key only, password login refused."
+}
 
 # ─── Claude Code ──────────────────────────────────────────────────────────────
 install_claude() {
@@ -506,6 +528,7 @@ show_summary() {
   say "  User        : {1}" "$CT_USER"
   if [[ $PW_GENERATED == 1 ]]; then say "  Password    : {1}   (generated: write it down)" "$USER_PW"; fi
   say "  Connect     : ssh {1}@{2}" "$CT_USER" "${ip:-$CT_HOST.local}"
+  if [[ -n $SSH_PUBKEY ]]; then say "                (SSH key only; the password is for sudo and the console)"; fi
   say "  Console     : pct enter {1}, then su - {2}" "$CTID" "$CT_USER"
   say "  Then run    : claude   (first launch: sign in through the link shown)"
   say "  Projects    : ~/projects"

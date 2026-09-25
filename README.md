@@ -92,6 +92,10 @@ CLX_HOSTNAME=claude-satwatch CLX_SSH_KEY=~/.ssh/id_ed25519.pub \
 - Root : mot de passe verrouillé (`passwd -l root`) et SSH par clé uniquement
   (`PermitRootLogin prohibit-password`), imposés par le script quel que soit
   le template.
+- **Clé SSH fournie → SSH par clé uniquement** : la connexion SSH par mot de
+  passe est refusée (`PasswordAuthentication no`), une fois la clé installée.
+  Le mot de passe de l'utilisateur sert alors à sudo et à la console
+  (`pct enter`). Sans clé, la connexion par mot de passe reste possible.
 - Le mot de passe passe par l'entrée standard (`chpasswd`), jamais sur une
   ligne de commande.
 - Sudo sans mot de passe est un choix de confort pour un conteneur de

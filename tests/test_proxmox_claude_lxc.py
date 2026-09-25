@@ -117,6 +117,10 @@ def test_interactive_install_with_defaults(tmp_path, proxmox) -> None:
     assert "passwd -l root" in calls                          # locked whatever the template does
     assert "PermitRootLogin prohibit-password" in calls
     assert calls.index("passwd -l root") < calls.index("useradd")
+    # Key given: SSH refuses passwords, set only once the key is in place.
+    assert "PasswordAuthentication no" in calls and "KbdInteractiveAuthentication no" in calls
+    assert calls.index("authorized_keys") < calls.index("PasswordAuthentication no")
+    assert "SSH: key only, password login refused" in r.stdout
     assert "ripgrep" in calls and "build-essential" in calls and "openssh-server" in calls
     assert "useradd -m -s /bin/bash -G sudo dev" in calls
     assert "NOPASSWD:ALL" in calls
@@ -171,6 +175,13 @@ def test_missing_ssh_key_file_stops_before_anything(tmp_path, proxmox) -> None:
     r = run(proxmox, None, "--yes", CLX_SSH_KEY=str(tmp_path / "nope.pub"))
     assert r.returncode != 0 and "SSH key file not found" in r.stderr
     assert "pct create" not in log(tmp_path)
+
+
+def test_without_key_ssh_keeps_passwords(tmp_path, proxmox) -> None:
+    r = run(proxmox, None, "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "PasswordAuthentication" not in log(tmp_path)     # otherwise no way in over SSH
+    assert "SSH: password login (no key given)" in r.stdout
 
 
 def test_cancel_creates_nothing(tmp_path, proxmox) -> None:
